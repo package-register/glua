@@ -593,17 +593,17 @@ func (fc *funcContext) CloseUpvalues() int {
 }
 
 func (fc *funcContext) LeaveBlock() int {
+	// emit close calls for <close> variables (in reverse order) BEFORE closing upvalues
+	bl := fc.Block
+	for i := len(bl.closeRegs) - 1; i >= 0; i-- {
+		fc.Code.AddABC(OP_CLOSEVAR, bl.closeRegs[i], 0, 0, bl.LastLine)
+	}
+
 	closed := fc.CloseUpvalues()
 
 	// remove const vars that were declared in this block
 	for _, name := range fc.Block.constVars {
 		delete(fc.constVars, name)
-	}
-
-	// emit close calls for <close> variables (in reverse order)
-	bl := fc.Block
-	for i := len(bl.closeRegs) - 1; i >= 0; i-- {
-		fc.Code.AddABC(OP_CLOSEVAR, bl.closeRegs[i], 0, 0, bl.LastLine)
 	}
 
 	fc.EndScope()
@@ -723,7 +723,7 @@ func compileAssignStmtLeft(context *funcContext, stmt *ast.AssignStmt) (int, []*
 				}
 				context.ConstIndex(LString(st.Value))
 			case ecUpvalue:
-				if context.constVars[st.Value] {
+				if isLocalConst(context, st.Value) {
 					raiseCompileError(context, sline(stmt), "cannot assign to constant variable '%s'", st.Value)
 				}
 				context.Upvalues.RegisterUnique(st.Value)
@@ -1368,14 +1368,26 @@ func constFold(exp ast.Expr) ast.Expr { // {{{
 			case "/":
 				return &constLValueExpr{Value: lvalue / rvalue}
 			case "//":
-				return &constLValueExpr{Value: LNumber(float64(int64(lvalue) / int64(rvalue)))}
+				// Lua floor division (rounds toward negative infinity)
+				q := int64(lvalue) / int64(rvalue)
+				r := int64(lvalue) % int64(rvalue)
+				if r != 0 && ((int64(lvalue) < 0) != (int64(rvalue) < 0)) {
+					q--
+				}
+				return &constLValueExpr{Value: LNumber(q)}
 			case "%":
 				return &constLValueExpr{Value: luaModulo(lvalue, rvalue)}
 			case "^":
 				return &constLValueExpr{Value: LNumber(math.Pow(float64(lvalue), float64(rvalue)))}
 			case "<<":
+				if int64(rvalue) < 0 {
+					return &constLValueExpr{Value: LNumber(int64(lvalue) >> uint(-int64(rvalue)))}
+				}
 				return &constLValueExpr{Value: LNumber(int64(lvalue) << uint(int64(rvalue)))}
 			case ">>":
+				if int64(rvalue) < 0 {
+					return &constLValueExpr{Value: LNumber(int64(lvalue) << uint(-int64(rvalue)))}
+				}
 				return &constLValueExpr{Value: LNumber(int64(lvalue) >> uint(int64(rvalue)))}
 			case "&":
 				return &constLValueExpr{Value: LNumber(int64(lvalue) & int64(rvalue))}
@@ -1907,6 +1919,15 @@ func isGlobalConstMode(context *funcContext) bool { // {{{
 func isGlobalDeclared(context *funcContext, name string) bool { // {{{
 	for ctx := context; ctx != nil; ctx = ctx.Parent {
 		if ctx.declaredGlobals[name] {
+			return true
+		}
+	}
+	return false
+} // }}}
+
+func isLocalConst(context *funcContext, name string) bool { // {{{
+	for ctx := context; ctx != nil; ctx = ctx.Parent {
+		if ctx.constVars[name] {
 			return true
 		}
 	}

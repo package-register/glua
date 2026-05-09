@@ -68,7 +68,7 @@ import (
 %right T2Comma
 %left '+' '-'
 %left '*' '/' '%' TIDiv
-%right UNARY /* not # -(unary) */
+%right UNARY /* not # -(unary) ~(unary) */
 %right '^'
 
 %%
@@ -443,6 +443,10 @@ expr:
         } |
         '#' expr %prec UNARY {
             $$ = &ast.UnaryLenOpExpr{Expr: $2}
+            $$.SetLine($2.Line())
+        } |
+        '~' expr %prec UNARY {
+            $$ = &ast.UnaryBnotOpExpr{Expr: $2}
             $$.SetLine($2.Line())
         }
 

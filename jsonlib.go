@@ -97,6 +97,10 @@ func lValueFromJSON(v interface{}) LValue {
 }
 
 func lValueToJSON(val LValue) interface{} {
+	return lValueToJSONWithVisited(val, make(map[*LTable]bool))
+}
+
+func lValueToJSONWithVisited(val LValue, visited map[*LTable]bool) interface{} {
 	switch v := val.(type) {
 	case *LNilType:
 		return nil
@@ -107,6 +111,12 @@ func lValueToJSON(val LValue) interface{} {
 	case LString:
 		return string(v)
 	case *LTable:
+		if visited[v] {
+			return nil
+		}
+		visited[v] = true
+		defer delete(visited, v)
+
 		// check if purely array-like (consecutive integer keys starting from 1)
 		maxN := v.MaxN()
 		hasStrKey := false
@@ -125,7 +135,7 @@ func lValueToJSON(val LValue) interface{} {
 				if n, ok := key.(LNumber); ok {
 					idx := int(n) - 1
 					if idx >= 0 && idx < arrLen {
-						arr[idx] = lValueToJSON(value)
+						arr[idx] = lValueToJSONWithVisited(value, visited)
 					}
 				}
 			})
@@ -136,9 +146,9 @@ func lValueToJSON(val LValue) interface{} {
 		obj := make(map[string]interface{})
 		v.ForEach(func(key, value LValue) {
 			if s, ok := key.(LString); ok {
-				obj[string(s)] = lValueToJSON(value)
+				obj[string(s)] = lValueToJSONWithVisited(value, visited)
 			} else if n, ok := key.(LNumber); ok {
-				obj[fmt.Sprintf("%d", int(n))] = lValueToJSON(value)
+				obj[fmt.Sprintf("%d", int(n))] = lValueToJSONWithVisited(value, visited)
 			}
 		})
 		return obj

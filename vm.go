@@ -2277,7 +2277,7 @@ func init() {
 			A := int(inst>>18) & 0xff
 			RA := lbase + A
 			val := reg.Get(RA)
-			if val == LNil || val == LFalse {
+			if val == LNil {
 				return 0
 			}
 			mt := L.metatable(val, true)
@@ -2286,7 +2286,7 @@ func init() {
 			}
 			closeFn := L.getFieldString(mt, "__close")
 			if closeFn.Type() != LTFunction {
-				return 0
+				L.RaiseError("__close metamethod is not a function, got %s", closeFn.Type().String())
 			}
 			L.reg.Push(closeFn)
 			L.reg.Push(val)
@@ -2378,7 +2378,13 @@ func numberArith(L *LState, opcode int, lhs, rhs LNumber) LNumber {
 	case OP_DIV:
 		return lhs / rhs
 	case OP_IDIV:
-		return LNumber(float64(int64(lhs) / int64(rhs)))
+		// Lua floor division (rounds toward negative infinity)
+		q := int64(lhs) / int64(rhs)
+		r := int64(lhs) % int64(rhs)
+		if r != 0 && ((int64(lhs) < 0) != (int64(rhs) < 0)) {
+			q--
+		}
+		return LNumber(q)
 	case OP_MOD:
 		return luaModulo(lhs, rhs)
 	case OP_POW:
@@ -2386,9 +2392,17 @@ func numberArith(L *LState, opcode int, lhs, rhs LNumber) LNumber {
 		frhs := float64(rhs)
 		return LNumber(math.Pow(flhs, frhs))
 	case OP_SHL:
-		return LNumber(int64(lhs) << uint(int64(rhs)))
+		shift := int64(rhs)
+		if shift < 0 {
+			return LNumber(int64(lhs) >> uint(-shift))
+		}
+		return LNumber(int64(lhs) << uint(shift))
 	case OP_SHR:
-		return LNumber(int64(lhs) >> uint(int64(rhs)))
+		shift := int64(rhs)
+		if shift < 0 {
+			return LNumber(int64(lhs) << uint(-shift))
+		}
+		return LNumber(int64(lhs) >> uint(shift))
 	case OP_BAND:
 		return LNumber(int64(lhs) & int64(rhs))
 	case OP_BOR:

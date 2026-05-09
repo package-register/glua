@@ -1,9 +1,9 @@
 print('testing operators (Lua 5.3-5.4)')
 
--- integer division // (truncates toward zero, like Go)
+-- integer division // (floor division, Lua semantics)
 assert(10 // 3 == 3, "// basic failed")
-assert(-10 // 3 == -3, "// negative failed")
-assert(10 // -3 == -3, "// negative divisor failed")
+assert(-10 // 3 == -4, "// negative failed")
+assert(10 // -3 == -4, "// negative divisor failed")
 assert(-10 // -3 == 3, "// both negative failed")
 assert(0 // 5 == 0, "// zero failed")
 assert(5 // 1 == 5, "// identity failed")
@@ -54,6 +54,12 @@ assert(10 // 2 * 3 == 15, "prec: // and * left to right")
 -- combined bitwise operations
 assert(0xFF & 0xF0 | 0x0F == 0xFF, "combined &| failed")
 assert(0xFF ~ 0xF0 & 0x0F == 0xFF, "combined ~& failed")
+
+-- unary ~ bitwise NOT
+assert(~0 == -1, "~ 0 failed")
+assert(~1 == -2, "~ 1 failed")
+assert(~255 == -256, "~ 255 failed")
+assert(~~42 == 42, "~~ identity failed")
 
 -- metamethods for bitwise operators
 do
