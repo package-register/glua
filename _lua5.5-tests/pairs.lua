@@ -21,7 +21,27 @@ do
   assert(sum == 60, "ipairs normal failed")
 end
 
--- __pairs basic
+-- normal pairs with nil values
+do
+  local t = {a = 1, b = nil, c = 3}
+  local count = 0
+  for k, v in pairs(t) do
+    count = count + 1
+  end
+  assert(count == 2, "pairs with nil count failed")
+end
+
+-- normal ipairs with holes
+do
+  local t = {1, nil, 3}
+  local count = 0
+  for i, v in ipairs(t) do
+    count = count + 1
+  end
+  assert(count == 1, "ipairs with holes failed")  -- stops at nil
+end
+
+-- __pairs basic: metamethod is called
 do
   local called = false
   local t = {}
@@ -31,19 +51,17 @@ do
       return next, self, nil
     end
   })
-  for k, v in pairs(t) do
-    -- nothing
-  end
+  for k, v in pairs(t) do end
   assert(called, "__pairs was not called")
 end
 
--- __pairs with custom iterator
+-- __pairs with custom iterator (filtered keys)
 do
   local t = {}
   setmetatable(t, {
     __pairs = function(self)
-      local data = {a = 10, b = 20}
-      local keys = {"a", "b"}
+      local data = {a = 10, b = 20, c = 30}
+      local keys = {"a", "c"}
       local i = 0
       return function(tbl, key)
         i = i + 1
@@ -58,10 +76,26 @@ do
   for k, v in pairs(t) do
     sum = sum + v
   end
-  assert(sum == 30, "__pairs custom iterator failed")
+  assert(sum == 40, "__pairs custom iterator failed")  -- only a=10, c=30
 end
 
--- __ipairs basic
+-- __pairs returning additional values
+do
+  local t = {}
+  setmetatable(t, {
+    __pairs = function(self)
+      return function(_, key)
+        if key == nil then return "hello", 42 end
+        return nil
+      end, self, nil
+    end
+  })
+  local k, v = pairs(t)
+  local a, b = k(v, nil)
+  assert(a == "hello" and b == 42, "__pairs two values failed")
+end
+
+-- __ipairs basic: metamethod is called
 do
   local called = false
   local t = {}
@@ -84,13 +118,14 @@ do
   assert(sum == 60, "__ipairs sum failed")
 end
 
--- __ipairs with custom data
+-- __ipairs with custom data source
 do
   local t = {}
   setmetatable(t, {
     __ipairs = function(self)
-      local data = {100, 200, 300}
-      return function(tbl, i)
+      local data = {100, 200, 300, 400}
+      local i = 0
+      return function(tbl, idx)
         i = i + 1
         local v = data[i]
         if v then return i, v end
@@ -102,11 +137,32 @@ do
   for i, v in ipairs(t) do
     sum = sum + v
   end
-  assert(sum == 600, "__ipairs custom data failed")
+  assert(sum == 1000, "__ipairs custom data failed")
 end
 
--- __pairs returns non-function (error handling via pcall)
--- table without metatable still works normally for pairs/ipairs
+-- __pairs returns non-function (falls through to default behavior)
+do
+  local t = {x = 1, y = 2}
+  setmetatable(t, {__pairs = 42})
+  local count = 0
+  for k, v in pairs(t) do
+    count = count + 1
+  end
+  assert(count == 2, "__pairs non-function fallback failed")
+end
+
+-- __ipairs returns non-function (falls through to default behavior)
+do
+  local t = {10, 20}
+  setmetatable(t, {__ipairs = "invalid"})
+  local sum = 0
+  for i, v in ipairs(t) do
+    sum = sum + v
+  end
+  assert(sum == 30, "__ipairs non-function fallback failed")
+end
+
+-- table without metatable still works normally
 do
   local t = {1, 2, 3, x = 1, y = 2}
   local sum_k = 0

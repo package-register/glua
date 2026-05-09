@@ -365,10 +365,11 @@ type codeBlock struct {
 	labels         map[string]*gotoLabelDesc
 	firstGotoIndex int
 	closeRegs      []int
+	constVars      []string
 }
 
 func newCodeBlock(localvars *varNamePool, blabel int, parent *codeBlock, pos ast.PositionHolder, firstGotoIndex int) *codeBlock {
-	bl := &codeBlock{localvars, blabel, parent, false, 0, 0, map[string]*gotoLabelDesc{}, firstGotoIndex, nil}
+	bl := &codeBlock{LocalVars: localvars, BreakLabel: blabel, Parent: parent, RefUpvalue: false, LineStart: 0, LastLine: 0, labels: map[string]*gotoLabelDesc{}, firstGotoIndex: firstGotoIndex, closeRegs: nil, constVars: nil}
 	if pos != nil {
 		bl.LineStart = pos.Line()
 		bl.LastLine = pos.LastLine()
@@ -593,6 +594,11 @@ func (fc *funcContext) CloseUpvalues() int {
 
 func (fc *funcContext) LeaveBlock() int {
 	closed := fc.CloseUpvalues()
+
+	// remove const vars that were declared in this block
+	for _, name := range fc.Block.constVars {
+		delete(fc.constVars, name)
+	}
 
 	// emit close calls for <close> variables (in reverse order)
 	bl := fc.Block
@@ -886,6 +892,7 @@ func compileLocalAssignStmt(context *funcContext, stmt *ast.LocalAssignStmt) { /
 			compileRegAssignment(context, stmt.Names, stmt.Exprs, reg, len(stmt.Names), sline(stmt))
 			if stmt.IsConst {
 				context.constVars[stmt.Names[0]] = true
+				context.Block.constVars = append(context.Block.constVars, stmt.Names[0])
 			}
 			if stmt.IsClose {
 				context.Block.closeRegs = append(context.Block.closeRegs, vreg)
@@ -899,6 +906,7 @@ func compileLocalAssignStmt(context *funcContext, stmt *ast.LocalAssignStmt) { /
 		vreg := context.RegisterLocalVar(name)
 		if stmt.IsConst {
 			context.constVars[name] = true
+			context.Block.constVars = append(context.Block.constVars, name)
 		}
 		if stmt.IsClose {
 			context.Block.closeRegs = append(context.Block.closeRegs, vreg)
