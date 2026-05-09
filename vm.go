@@ -760,8 +760,75 @@ func init() {
 		opArith, // OP_SUB
 		opArith, // OP_MUL
 		opArith, // OP_DIV
+		opArith, // OP_IDIV
 		opArith, // OP_MOD
 		opArith, // OP_POW
+		opArith, // OP_SHL
+		opArith, // OP_SHR
+		opArith, // OP_BAND
+		opArith, // OP_BOR
+		opArith, // OP_BXOR
+		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_BNOT
+			reg := L.reg
+			cf := L.currentFrame
+			lbase := cf.LocalBase
+			A := int(inst>>18) & 0xff //GETA
+			RA := lbase + A
+			B := int(inst & 0x1ff) //GETB
+			unaryv := L.rkValue(B)
+			if nm, ok := unaryv.(LNumber); ok {
+				// this section is inlined by go-inline
+				// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
+				{
+					rg := reg
+					regi := RA
+					vali := LNumber(^int64(nm))
+					newSize := regi + 1
+					// this section is inlined by go-inline
+					// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
+					{
+						requiredSize := newSize
+						if requiredSize > cap(rg.array) {
+							rg.resize(requiredSize)
+						}
+					}
+					rg.array[regi] = rg.alloc.LNumber2I(vali)
+					if regi >= rg.top {
+						rg.top = regi + 1
+					}
+				}
+			} else {
+				op := L.metaOp1(unaryv, "__bnot")
+				if op.Type() == LTFunction {
+					reg.Push(op)
+					reg.Push(unaryv)
+					L.Call(1, 1)
+					// this section is inlined by go-inline
+					// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
+					{
+						rg := reg
+						regi := RA
+						vali := reg.Pop()
+						newSize := regi + 1
+						// this section is inlined by go-inline
+						// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
+						{
+							requiredSize := newSize
+							if requiredSize > cap(rg.array) {
+								rg.resize(requiredSize)
+							}
+						}
+						rg.array[regi] = vali
+						if regi >= rg.top {
+							rg.top = regi + 1
+						}
+					}
+				} else {
+					L.RaiseError("__bnot undefined")
+				}
+			}
+			return 0
+		},
 		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_UNM
 			reg := L.reg
 			cf := L.currentFrame
@@ -2203,10 +2270,33 @@ func init() {
 		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_NOP
 			return 0
 		},
+		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_CLOSEVAR
+			reg := L.reg
+			cf := L.currentFrame
+			lbase := cf.LocalBase
+			A := int(inst>>18) & 0xff
+			RA := lbase + A
+			val := reg.Get(RA)
+			if val == LNil || val == LFalse {
+				return 0
+			}
+			mt := L.metatable(val, true)
+			if mt == LNil {
+				return 0
+			}
+			closeFn := L.getFieldString(mt, "__close")
+			if closeFn.Type() != LTFunction {
+				return 0
+			}
+			L.reg.Push(closeFn)
+			L.reg.Push(val)
+			L.Call(1, 0)
+			return 0
+		},
 	}
 }
 
-func opArith(L *LState, inst uint32, baseframe *callFrame) int { //OP_ADD, OP_SUB, OP_MUL, OP_DIV, OP_MOD, OP_POW
+func opArith(L *LState, inst uint32, baseframe *callFrame) int { //OP_ADD, OP_SUB, OP_MUL, OP_DIV, OP_IDIV, OP_MOD, OP_POW, OP_SHL, OP_SHR, OP_BAND, OP_BOR, OP_BXOR
 	reg := L.reg
 	cf := L.currentFrame
 	lbase := cf.LocalBase
@@ -2287,12 +2377,24 @@ func numberArith(L *LState, opcode int, lhs, rhs LNumber) LNumber {
 		return lhs * rhs
 	case OP_DIV:
 		return lhs / rhs
+	case OP_IDIV:
+		return LNumber(float64(int64(lhs) / int64(rhs)))
 	case OP_MOD:
 		return luaModulo(lhs, rhs)
 	case OP_POW:
 		flhs := float64(lhs)
 		frhs := float64(rhs)
 		return LNumber(math.Pow(flhs, frhs))
+	case OP_SHL:
+		return LNumber(int64(lhs) << uint(int64(rhs)))
+	case OP_SHR:
+		return LNumber(int64(lhs) >> uint(int64(rhs)))
+	case OP_BAND:
+		return LNumber(int64(lhs) & int64(rhs))
+	case OP_BOR:
+		return LNumber(int64(lhs) | int64(rhs))
+	case OP_BXOR:
+		return LNumber(int64(lhs) ^ int64(rhs))
 	}
 	panic("should not reach here")
 	return LNumber(0)
@@ -2309,10 +2411,22 @@ func objectArith(L *LState, opcode int, lhs, rhs LValue) LValue {
 		event = "__mul"
 	case OP_DIV:
 		event = "__div"
+	case OP_IDIV:
+		event = "__idiv"
 	case OP_MOD:
 		event = "__mod"
 	case OP_POW:
 		event = "__pow"
+	case OP_SHL:
+		event = "__shl"
+	case OP_SHR:
+		event = "__shr"
+	case OP_BAND:
+		event = "__band"
+	case OP_BOR:
+		event = "__bor"
+	case OP_BXOR:
+		event = "__bxor"
 	}
 	op := L.metaOp2(lhs, rhs, event)
 	if _, ok := op.(*LFunction); ok {

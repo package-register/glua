@@ -33,6 +33,24 @@ func (e *Error) Error() string {
 
 func writeChar(buf *bytes.Buffer, c int) { buf.WriteByte(byte(c)) }
 
+func writeUTF8Rune(buf *bytes.Buffer, r rune) {
+	if r < 0x80 {
+		buf.WriteByte(byte(r))
+	} else if r < 0x800 {
+		buf.WriteByte(0xC0 | byte(r>>6))
+		buf.WriteByte(0x80 | byte(r&0x3F))
+	} else if r < 0x10000 {
+		buf.WriteByte(0xE0 | byte(r>>12))
+		buf.WriteByte(0x80 | byte((r>>6)&0x3F))
+		buf.WriteByte(0x80 | byte(r&0x3F))
+	} else {
+		buf.WriteByte(0xF0 | byte(r>>18))
+		buf.WriteByte(0x80 | byte((r>>12)&0x3F))
+		buf.WriteByte(0x80 | byte((r>>6)&0x3F))
+		buf.WriteByte(0x80 | byte(r&0x3F))
+	}
+}
+
 func isDecimal(ch int) bool { return '0' <= ch && ch <= '9' }
 
 func isIdent(ch int, pos int) bool {
@@ -144,27 +162,70 @@ func (sc *Scanner) scanIdent(ch int, buf *bytes.Buffer) error {
 
 func (sc *Scanner) scanDecimal(ch int, buf *bytes.Buffer) error {
 	writeChar(buf, ch)
-	for isDecimal(sc.Peek()) {
-		writeChar(buf, sc.Next())
+	for isDecimal(sc.Peek()) || sc.Peek() == '_' {
+		ch = sc.Next()
+		if ch != '_' {
+			writeChar(buf, ch)
+		}
 	}
 	return nil
 }
 
 func (sc *Scanner) scanNumber(ch int, buf *bytes.Buffer) error {
-	if ch == '0' { // octal
-		if sc.Peek() == 'x' || sc.Peek() == 'X' {
+	if ch == '0' { // hex, octal, or binary
+		peek := sc.Peek()
+		if peek == 'x' || peek == 'X' {
 			writeChar(buf, ch)
 			writeChar(buf, sc.Next())
-			hasvalue := false
-			for isDigit(sc.Peek()) {
-				writeChar(buf, sc.Next())
-				hasvalue = true
+			// integer part
+			for p := sc.Peek(); isDigit(p) || p == '_'; p = sc.Peek() {
+				ch = sc.Next()
+				if ch != '_' {
+					writeChar(buf, ch)
+				}
 			}
-			if !hasvalue {
+			// fractional part
+			if sc.Peek() == '.' {
+				writeChar(buf, sc.Next())
+				for p := sc.Peek(); isDigit(p) || p == '_'; p = sc.Peek() {
+					ch = sc.Next()
+					if ch != '_' {
+						writeChar(buf, ch)
+					}
+				}
+			}
+			// hex float exponent
+			if p := sc.Peek(); p == 'p' || p == 'P' {
+				writeChar(buf, sc.Next())
+				if p2 := sc.Peek(); p2 == '-' || p2 == '+' {
+					writeChar(buf, sc.Next())
+				}
+				if isDecimal(sc.Peek()) {
+					sc.scanDecimal(sc.Next(), buf)
+				}
+				return nil
+			}
+			// must have at least one digit
+			if buf.Len() == 2 { // just "0x"
 				return sc.Error(buf.String(), "illegal hexadecimal number")
 			}
 			return nil
-		} else if sc.Peek() != '.' && isDecimal(sc.Peek()) {
+		} else if peek == 'b' || peek == 'B' {
+			writeChar(buf, ch)
+			writeChar(buf, sc.Next())
+			hasvalue := false
+			for p := sc.Peek(); p == '0' || p == '1' || p == '_'; p = sc.Peek() {
+				ch = sc.Next()
+				if ch != '_' {
+					writeChar(buf, ch)
+					hasvalue = true
+				}
+			}
+			if !hasvalue {
+				return sc.Error(buf.String(), "illegal binary number")
+			}
+			return nil
+		} else if peek != '.' && isDecimal(peek) {
 			ch = sc.Next()
 		}
 	}
@@ -229,6 +290,42 @@ func (sc *Scanner) scanEscape(ch int, buf *bytes.Buffer) error {
 	case '\r':
 		buf.WriteByte('\n')
 		sc.Newline('\r')
+	case 'x':
+		var bytes [2]byte
+		for i := 0; i < 2; i++ {
+			c := sc.Peek()
+			if isDigit(c) {
+				bytes[i] = byte(sc.Next())
+			} else {
+				return sc.Error(buf.String(), "invalid hex escape")
+			}
+		}
+		val, _ := strconv.ParseInt(string(bytes[:]), 16, 32)
+		writeChar(buf, int(val))
+	case 'u':
+		ch = sc.Next()
+		if ch != '{' {
+			return sc.Error(buf.String(), "invalid unicode escape")
+		}
+		var codeBuf bytes.Buffer
+		for {
+			c := sc.Peek()
+			if c == '}' {
+				sc.Next()
+				break
+			}
+			if isDigit(c) {
+				codeBuf.WriteByte(byte(sc.Next()))
+			} else {
+				return sc.Error(buf.String(), "invalid unicode escape")
+			}
+		}
+		val, err := strconv.ParseInt(codeBuf.String(), 16, 32)
+		if err != nil || val < 0 || val > 0x10FFFF {
+			return sc.Error(buf.String(), "invalid unicode code point")
+		}
+		// encode as UTF-8
+		writeUTF8Rune(buf, rune(val))
 	default:
 		if '0' <= ch && ch <= '9' {
 			bytes := []byte{byte(ch)}
@@ -285,7 +382,7 @@ finally:
 var reservedWords = map[string]int{
 	"and": TAnd, "break": TBreak, "do": TDo, "else": TElse, "elseif": TElseIf,
 	"end": TEnd, "false": TFalse, "for": TFor, "function": TFunction,
-	"if": TIf, "in": TIn, "local": TLocal, "nil": TNil, "not": TNot, "or": TOr,
+	"global": TGlobal, "if": TIf, "in": TIn, "local": TLocal, "nil": TNil, "not": TNot, "or": TOr,
 	"return": TReturn, "repeat": TRepeat, "then": TThen, "true": TTrue,
 	"until": TUntil, "while": TWhile, "goto": TGoto}
 
@@ -369,12 +466,17 @@ redo:
 				tok.Str = "~="
 				sc.Next()
 			} else {
-				err = sc.Error("~", "Invalid '~' token")
+				tok.Type = ch
+				tok.Str = string(rune(ch))
 			}
 		case '<':
 			if sc.Peek() == '=' {
 				tok.Type = TLte
 				tok.Str = "<="
+				sc.Next()
+			} else if sc.Peek() == '<' {
+				tok.Type = TShl
+				tok.Str = "<<"
 				sc.Next()
 			} else {
 				tok.Type = ch
@@ -384,6 +486,10 @@ redo:
 			if sc.Peek() == '=' {
 				tok.Type = TGte
 				tok.Str = ">="
+				sc.Next()
+			} else if sc.Peek() == '>' {
+				tok.Type = TShr
+				tok.Str = ">>"
 				sc.Next()
 			} else {
 				tok.Type = ch
@@ -418,9 +524,18 @@ redo:
 				tok.Type = ch
 				tok.Str = string(rune(ch))
 			}
-		case '+', '*', '/', '%', '^', '#', '(', ')', '{', '}', ']', ';', ',':
+		case '+', '*', '%', '^', '#', '(', ')', '{', '}', ']', ';', ',', '&', '|':
 			tok.Type = ch
 			tok.Str = string(rune(ch))
+		case '/':
+			if sc.Peek() == '/' {
+				tok.Type = TIDiv
+				tok.Str = "//"
+				sc.Next()
+			} else {
+				tok.Type = ch
+				tok.Str = string(rune(ch))
+			}
 		default:
 			writeChar(buf, ch)
 			err = sc.Error(buf.String(), "Invalid token")

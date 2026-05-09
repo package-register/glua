@@ -364,10 +364,11 @@ type codeBlock struct {
 	LastLine       int
 	labels         map[string]*gotoLabelDesc
 	firstGotoIndex int
+	closeRegs      []int
 }
 
 func newCodeBlock(localvars *varNamePool, blabel int, parent *codeBlock, pos ast.PositionHolder, firstGotoIndex int) *codeBlock {
-	bl := &codeBlock{localvars, blabel, parent, false, 0, 0, map[string]*gotoLabelDesc{}, firstGotoIndex}
+	bl := &codeBlock{localvars, blabel, parent, false, 0, 0, map[string]*gotoLabelDesc{}, firstGotoIndex, nil}
 	if pos != nil {
 		bl.LineStart = pos.Line()
 		bl.LastLine = pos.LastLine()
@@ -410,6 +411,9 @@ type funcContext struct {
 	labelPc         map[int]int
 	gotosCount      int
 	unresolvedGotos map[int]*gotoLabelDesc
+	globalConstMode   bool
+	declaredGlobals   map[string]bool
+	constVars         map[string]bool
 }
 
 func newFuncContext(sourcename string, parent *funcContext) *funcContext {
@@ -424,6 +428,9 @@ func newFuncContext(sourcename string, parent *funcContext) *funcContext {
 		labelPc:         map[int]int{},
 		gotosCount:      0,
 		unresolvedGotos: map[int]*gotoLabelDesc{},
+		globalConstMode: false,
+		declaredGlobals: map[string]bool{},
+		constVars:       map[string]bool{},
 	}
 	fc.Blocks = []*codeBlock{fc.Block}
 	return fc
@@ -586,6 +593,13 @@ func (fc *funcContext) CloseUpvalues() int {
 
 func (fc *funcContext) LeaveBlock() int {
 	closed := fc.CloseUpvalues()
+
+	// emit close calls for <close> variables (in reverse order)
+	bl := fc.Block
+	for i := len(bl.closeRegs) - 1; i >= 0; i-- {
+		fc.Code.AddABC(OP_CLOSEVAR, bl.closeRegs[i], 0, 0, bl.LastLine)
+	}
+
 	fc.EndScope()
 
 	if fc.Block.Parent != nil {
@@ -683,6 +697,8 @@ func compileStmt(context *funcContext, stmt ast.Stmt, isLastStmt bool) { // {{{
 		compileLabelStmt(context, st, isLastStmt)
 	case *ast.GotoStmt:
 		compileGotoStmt(context, st)
+	case *ast.GlobalDeclStmt:
+		compileGlobalDeclStmt(context, st)
 	}
 } // }}}
 
@@ -696,10 +712,19 @@ func compileAssignStmtLeft(context *funcContext, stmt *ast.AssignStmt) (int, []*
 			ec := &expcontext{identtype, regNotDefined, 0}
 			switch identtype {
 			case ecGlobal:
+				if isGlobalConstMode(context) && !isGlobalDeclared(context, st.Value) {
+					raiseCompileError(context, sline(stmt), "global '%s' is not declared (use 'global %s' to declare it)", st.Value, st.Value)
+				}
 				context.ConstIndex(LString(st.Value))
 			case ecUpvalue:
+				if context.constVars[st.Value] {
+					raiseCompileError(context, sline(stmt), "cannot assign to constant variable '%s'", st.Value)
+				}
 				context.Upvalues.RegisterUnique(st.Value)
 			case ecLocal:
+				if context.constVars[st.Value] {
+					raiseCompileError(context, sline(stmt), "cannot assign to constant variable '%s'", st.Value)
+				}
 				ec.reg = context.FindLocalVar(st.Value)
 			}
 			acs = append(acs, &assigncontext{ec, 0, 0, false, false})
@@ -857,15 +882,67 @@ func compileLocalAssignStmt(context *funcContext, stmt *ast.LocalAssignStmt) { /
 	reg := context.RegTop()
 	if len(stmt.Names) == 1 && len(stmt.Exprs) == 1 {
 		if _, ok := stmt.Exprs[0].(*ast.FunctionExpr); ok {
-			context.RegisterLocalVar(stmt.Names[0])
+			vreg := context.RegisterLocalVar(stmt.Names[0])
 			compileRegAssignment(context, stmt.Names, stmt.Exprs, reg, len(stmt.Names), sline(stmt))
+			if stmt.IsConst {
+				context.constVars[stmt.Names[0]] = true
+			}
+			if stmt.IsClose {
+				context.Block.closeRegs = append(context.Block.closeRegs, vreg)
+			}
 			return
 		}
 	}
 
 	compileRegAssignment(context, stmt.Names, stmt.Exprs, reg, len(stmt.Names), sline(stmt))
 	for _, name := range stmt.Names {
-		context.RegisterLocalVar(name)
+		vreg := context.RegisterLocalVar(name)
+		if stmt.IsConst {
+			context.constVars[name] = true
+		}
+		if stmt.IsClose {
+			context.Block.closeRegs = append(context.Block.closeRegs, vreg)
+		}
+	}
+} // }}}
+
+func compileGlobalDeclStmt(context *funcContext, stmt *ast.GlobalDeclStmt) { // {{{
+	code := context.Code
+	reg := context.RegTop()
+
+	// global <const> * - enable strict globals mode
+	if stmt.IsConst && len(stmt.Names) == 0 {
+		context.globalConstMode = true
+		return
+	}
+
+	// register declared globals
+	for _, name := range stmt.Names {
+		context.declaredGlobals[name] = true
+	}
+
+	hasExprs := len(stmt.Exprs) > 0
+	nv := len(stmt.Names)
+	ne := len(stmt.Exprs)
+
+	// compile RHS expressions
+	for i, expr := range stmt.Exprs {
+		if i == ne-1 && nv > ne && isVarArgReturnExpr(expr) {
+			compileExpr(context, reg, expr, ecnone(-2))
+		} else {
+			reg += compileExpr(context, reg, expr, ecnone(0))
+		}
+	}
+
+	// emit SETGLOBAL for each name
+	for i, name := range stmt.Names {
+		k := context.ConstIndex(LString(name))
+		if hasExprs && i < ne {
+			code.AddABx(OP_SETGLOBAL, reg-(ne-i), k, sline(stmt))
+		} else {
+			code.AddABC(OP_LOADNIL, reg, reg, 0, sline(stmt))
+			code.AddABx(OP_SETGLOBAL, reg, k, sline(stmt))
+		}
 	}
 } // }}}
 
@@ -1212,7 +1289,7 @@ func compileExpr(context *funcContext, reg int, expr ast.Expr, ec *expcontext) i
 	case *ast.StringConcatOpExpr:
 		compileStringConcatOpExpr(context, reg, ex, ec)
 		return sused
-	case *ast.UnaryMinusOpExpr, *ast.UnaryNotOpExpr, *ast.UnaryLenOpExpr:
+	case *ast.UnaryMinusOpExpr, *ast.UnaryNotOpExpr, *ast.UnaryLenOpExpr, *ast.UnaryBnotOpExpr:
 		compileUnaryOpExpr(context, reg, ex, ec)
 		return sused
 	case *ast.RelationalOpExpr:
@@ -1282,10 +1359,22 @@ func constFold(exp ast.Expr) ast.Expr { // {{{
 				return &constLValueExpr{Value: lvalue * rvalue}
 			case "/":
 				return &constLValueExpr{Value: lvalue / rvalue}
+			case "//":
+				return &constLValueExpr{Value: LNumber(float64(int64(lvalue) / int64(rvalue)))}
 			case "%":
 				return &constLValueExpr{Value: luaModulo(lvalue, rvalue)}
 			case "^":
 				return &constLValueExpr{Value: LNumber(math.Pow(float64(lvalue), float64(rvalue)))}
+			case "<<":
+				return &constLValueExpr{Value: LNumber(int64(lvalue) << uint(int64(rvalue)))}
+			case ">>":
+				return &constLValueExpr{Value: LNumber(int64(lvalue) >> uint(int64(rvalue)))}
+			case "&":
+				return &constLValueExpr{Value: LNumber(int64(lvalue) & int64(rvalue))}
+			case "|":
+				return &constLValueExpr{Value: LNumber(int64(lvalue) | int64(rvalue))}
+			case "~":
+				return &constLValueExpr{Value: LNumber(int64(lvalue) ^ int64(rvalue))}
 			default:
 				panic(fmt.Sprintf("unknown binop: %v", expr.Operator))
 			}
@@ -1298,8 +1387,16 @@ func constFold(exp ast.Expr) ast.Expr { // {{{
 			return &constLValueExpr{Value: LNumber(-value)}
 		}
 		return expr
-	default:
+	case *ast.UnaryBnotOpExpr:
+		expr.Expr = constFold(expr.Expr)
+		if value, ok := lnumberValue(expr.Expr); ok {
+			return &constLValueExpr{Value: LNumber(^int64(value))}
+		}
+		return expr
+	case *ast.UnaryNotOpExpr, *ast.UnaryLenOpExpr:
 
+		return exp
+	default:
 		return exp
 	}
 } // }}}
@@ -1442,10 +1539,22 @@ func compileArithmeticOpExpr(context *funcContext, reg int, expr *ast.Arithmetic
 		op = OP_MUL
 	case "/":
 		op = OP_DIV
+	case "//":
+		op = OP_IDIV
 	case "%":
 		op = OP_MOD
 	case "^":
 		op = OP_POW
+	case "<<":
+		op = OP_SHL
+	case ">>":
+		op = OP_SHR
+	case "&":
+		op = OP_BAND
+	case "|":
+		op = OP_BOR
+	case "~":
+		op = OP_BXOR
 	}
 	context.Code.AddABC(op, a, b, c, sline(expr))
 } // }}}
@@ -1501,6 +1610,16 @@ func compileUnaryOpExpr(context *funcContext, reg int, expr ast.Expr, ec *expcon
 	case *ast.UnaryLenOpExpr:
 		opcode = OP_LEN
 		operandexpr = ex.Expr
+	case *ast.UnaryBnotOpExpr:
+		exp := constFold(ex)
+		if lvexpr, ok := exp.(*constLValueExpr); ok {
+			exp.SetLine(sline(expr))
+			compileExpr(context, reg, lvexpr, ec)
+			return
+		}
+		ex, _ = exp.(*ast.UnaryBnotOpExpr)
+		operandexpr = ex.Expr
+		opcode = OP_BNOT
 	}
 
 	a := savereg(ec, reg)
@@ -1766,6 +1885,24 @@ func getExprName(context *funcContext, expr ast.Expr) string { // {{{
 		return "?"
 	}
 	return "?"
+} // }}}
+
+func isGlobalConstMode(context *funcContext) bool { // {{{
+	for ctx := context; ctx != nil; ctx = ctx.Parent {
+		if ctx.globalConstMode {
+			return true
+		}
+	}
+	return false
+} // }}}
+
+func isGlobalDeclared(context *funcContext, name string) bool { // {{{
+	for ctx := context; ctx != nil; ctx = ctx.Parent {
+		if ctx.declaredGlobals[name] {
+			return true
+		}
+	}
+	return false
 } // }}}
 
 func patchCode(context *funcContext) { // {{{

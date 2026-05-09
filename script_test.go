@@ -42,6 +42,16 @@ var luaTests []string = []string{
 	"files.lua",
 }
 
+var lua55Tests []string = []string{
+	"goto.lua",
+	"operators.lua",
+	"literals.lua",
+	"const.lua",
+	"close.lua",
+	"global.lua",
+	"pairs.lua",
+}
+
 func testScriptCompile(t *testing.T, script string) {
 	file, err := os.Open(script)
 	if err != nil {
@@ -145,6 +155,10 @@ func TestGlua(t *testing.T) {
 
 func TestLua(t *testing.T) {
 	testScriptDir(t, luaTests, "_lua5.1-tests")
+}
+
+func TestLua55(t *testing.T) {
+	testScriptDir(t, lua55Tests, "_lua5.5-tests")
 }
 
 func TestMergingLoadNilBug2(t *testing.T) {

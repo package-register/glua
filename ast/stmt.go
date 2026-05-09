@@ -21,8 +21,10 @@ type AssignStmt struct {
 type LocalAssignStmt struct {
 	StmtBase
 
-	Names []string
-	Exprs []Expr
+	Names    []string
+	Exprs    []Expr
+	IsConst  bool
+	IsClose  bool
 }
 
 type FuncCallStmt struct {
@@ -104,4 +106,17 @@ type GotoStmt struct {
 	StmtBase
 
 	Label string
+}
+
+type GlobalDeclStmt struct {
+	StmtBase
+
+	Names      []string
+	Exprs      []Expr
+	IsConst    bool
+}
+
+type AttribAccess struct {
+	IsConst bool
+	IsClose bool
 }

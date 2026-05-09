@@ -150,6 +150,15 @@ func ipairsaux(L *LState) int {
 
 func baseIpairs(L *LState) int {
 	tb := L.CheckTable(1)
+	// check for __ipairs metamethod
+	if mt := L.GetMetatable(tb); mt != LNil {
+		if ipairsFn := L.getFieldString(mt, "__ipairs"); ipairsFn.Type() == LTFunction {
+			L.Push(ipairsFn)
+			L.Push(tb)
+			L.Call(1, 3)
+			return 3
+		}
+	}
 	L.Push(L.Get(UpvalueIndex(1)))
 	L.Push(tb)
 	L.Push(LNumber(0))
@@ -251,6 +260,15 @@ func pairsaux(L *LState) int {
 
 func basePairs(L *LState) int {
 	tb := L.CheckTable(1)
+	// check for __pairs metamethod
+	if mt := L.GetMetatable(tb); mt != LNil {
+		if pairsFn := L.getFieldString(mt, "__pairs"); pairsFn.Type() == LTFunction {
+			L.Push(pairsFn)
+			L.Push(tb)
+			L.Call(1, 3)
+			return 3
+		}
+	}
 	L.Push(L.Get(UpvalueIndex(1)))
 	L.Push(tb)
 	L.Push(LNil)

@@ -52,18 +52,22 @@ import (
 }
 
 /* Reserved words */
-%token<token> TAnd TBreak TDo TElse TElseIf TEnd TFalse TFor TFunction TIf TIn TLocal TNil TNot TOr TReturn TRepeat TThen TTrue TUntil TWhile TGoto
+%token<token> TAnd TBreak TDo TElse TElseIf TEnd TFalse TFor TFunction TGlobal TIf TIn TLocal TNil TNot TOr TReturn TRepeat TThen TTrue TUntil TWhile TGoto
 
 /* Literals */
-%token<token> TEqeq TNeq TLte TGte T2Comma T3Comma T2Colon TIdent TNumber TString '{' '('
+%token<token> TEqeq TNeq TLte TGte T2Comma T3Comma T2Colon TIdent TNumber TString TIDiv TShl TShr '{' '('
 
 /* Operators */
 %left TOr
 %left TAnd
 %left '>' '<' TGte TLte TEqeq TNeq
+%left '|'
+%left '~'
+%left '&'
+%left TShl TShr
 %right T2Comma
 %left '+' '-'
-%left '*' '/' '%'
+%left '*' '/' '%' TIDiv
 %right UNARY /* not # -(unary) */
 %right '^'
 
@@ -188,12 +192,43 @@ stat:
             $$ = &ast.LocalAssignStmt{Names: $2, Exprs:[]ast.Expr{}}
             $$.SetLine($1.Pos.Line)
         } |
+        TLocal namelist '<' TIdent '>' '=' exprlist {
+            attrib := &ast.AttribAccess{}
+            if $4.Str == "const" { attrib.IsConst = true }
+            if $4.Str == "close" { attrib.IsClose = true }
+            $$ = &ast.LocalAssignStmt{Names: $2, Exprs:$7, IsConst: attrib.IsConst, IsClose: attrib.IsClose}
+            $$.SetLine($1.Pos.Line)
+        } |
+        TLocal namelist '<' TIdent '>' {
+            attrib := &ast.AttribAccess{}
+            if $4.Str == "const" { attrib.IsConst = true }
+            if $4.Str == "close" { attrib.IsClose = true }
+            $$ = &ast.LocalAssignStmt{Names: $2, Exprs:[]ast.Expr{}, IsConst: attrib.IsConst, IsClose: attrib.IsClose}
+            $$.SetLine($1.Pos.Line)
+        } |
         T2Colon TIdent T2Colon {
             $$ = &ast.LabelStmt{Name: $2.Str}
             $$.SetLine($1.Pos.Line)
         } |
         TGoto TIdent {
             $$ = &ast.GotoStmt{Label: $2.Str}
+            $$.SetLine($1.Pos.Line)
+        } |
+        TGlobal namelist '=' exprlist {
+            $$ = &ast.GlobalDeclStmt{Names: $2, Exprs:$4}
+            $$.SetLine($1.Pos.Line)
+        } |
+        TGlobal namelist {
+            $$ = &ast.GlobalDeclStmt{Names: $2, Exprs:[]ast.Expr{}}
+            $$.SetLine($1.Pos.Line)
+        } |
+        TGlobal TFunction TIdent funcbody {
+            $$ = &ast.GlobalDeclStmt{Names:[]string{$3.Str}, Exprs: []ast.Expr{$4}}
+            $$.SetLine($1.Pos.Line)
+        } |
+        TGlobal '<' TIdent '>' '*' {
+            // global <const> * - strict globals mode, ignored at parse level
+            $$ = &ast.GlobalDeclStmt{Names: []string{}, Exprs: []ast.Expr{}, IsConst: true}
             $$.SetLine($1.Pos.Line)
         }
 
@@ -364,6 +399,30 @@ expr:
         } |
         expr '/' expr {
             $$ = &ast.ArithmeticOpExpr{Lhs: $1, Operator: "/", Rhs: $3}
+            $$.SetLine($1.Line())
+        } |
+        expr TIDiv expr {
+            $$ = &ast.ArithmeticOpExpr{Lhs: $1, Operator: "//", Rhs: $3}
+            $$.SetLine($1.Line())
+        } |
+        expr TShl expr {
+            $$ = &ast.ArithmeticOpExpr{Lhs: $1, Operator: "<<", Rhs: $3}
+            $$.SetLine($1.Line())
+        } |
+        expr TShr expr {
+            $$ = &ast.ArithmeticOpExpr{Lhs: $1, Operator: ">>", Rhs: $3}
+            $$.SetLine($1.Line())
+        } |
+        expr '&' expr {
+            $$ = &ast.ArithmeticOpExpr{Lhs: $1, Operator: "&", Rhs: $3}
+            $$.SetLine($1.Line())
+        } |
+        expr '|' expr {
+            $$ = &ast.ArithmeticOpExpr{Lhs: $1, Operator: "|", Rhs: $3}
+            $$.SetLine($1.Line())
+        } |
+        expr '~' expr {
+            $$ = &ast.ArithmeticOpExpr{Lhs: $1, Operator: "~", Rhs: $3}
             $$.SetLine($1.Line())
         } |
         expr '%' expr {

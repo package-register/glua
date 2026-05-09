@@ -130,6 +130,11 @@ type UnaryLenOpExpr struct {
 	Expr Expr
 }
 
+type UnaryBnotOpExpr struct {
+	ExprBase
+	Expr Expr
+}
+
 type FunctionExpr struct {
 	ExprBase
 
