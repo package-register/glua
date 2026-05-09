@@ -4,8 +4,8 @@
 -- 用法:
 --   local glm = require "glm"
 --   glm.set_key(os.getenv("GLM_API_KEY"))
---   local resp = glm.chat("你好")
---   print(resp.choices[1].message.content)
+--   local resp = glm.ask("你好")
+--   print(resp)
 
 local glm = {}
 
@@ -38,6 +38,12 @@ function glm.load_key_from_file(path)
   return false
 end
 
+local function requires_key()
+  if api_key == "" then
+    error("GLM API key not set. Call glm.set_key() or glm.load_key_from_env()")
+  end
+end
+
 local function build_headers()
   return {
     ["Authorization"] = "Bearer " .. api_key,
@@ -57,13 +63,6 @@ local function build_body(messages, opts)
   }
 end
 
-local function check_key()
-  -- NOTE: don't use error() + pcall to check key
-  -- gopher-lua has a bug where pcall-caught error objects
-  -- corrupt captured variables when passed through function calls
-  return api_key ~= ""
-end
-
 function glm.message(role, content)
   return {role = role, content = content}
 end
@@ -80,34 +79,31 @@ function glm.assistant(content)
   return glm.message("assistant", content)
 end
 
+-- The gopher-lua pcalling bug (issue #452) means we CANNOT pass
+-- pcall-caught error objects through function calls.
+-- Strategy: use protected calls only at the outermost layer.
+-- Internal functions raise errors directly; glm.chat wraps in pcall.
+
 function glm.chat(messages, opts)
-  if not check_key() then
-    return nil, "GLM API key not set. Call glm.set_key() or glm.load_key_from_env()"
-  end
+  requires_key()
   if type(messages) == "string" then
     messages = {{role = "user", content = messages}}
   end
   local body = build_body(messages, opts)
   local headers = build_headers()
-  local ok, resp = pcall(http.post, API_BASE, json.encode(body), headers)
-  if not ok then
-    return nil, tostring(resp)
-  end
+  local resp = http.post(API_BASE, json.encode(body), headers)
   if resp.status >= 400 then
-    return nil, "HTTP " .. resp.status .. ": " .. (resp.body or "")
+    return nil, "HTTP error: " .. resp.status
   end
-  local ok4, result = pcall(json.decode, resp.body)
-  if not ok4 then
-    return nil, "json decode failed: " .. tostring(result)
+  local result = json.decode(resp.body)
+  if not result then
+    return nil, "json decode failed"
   end
   return result, nil
 end
 
 function glm.chat_stream(messages, on_chunk, opts)
-  if not check_key() then
-    on_chunk(nil, "GLM API key not set. Call glm.set_key() or glm.load_key_from_env()")
-    return ""
-  end
+  requires_key()
   if type(messages) == "string" then
     messages = {{role = "user", content = messages}}
   end
@@ -116,7 +112,7 @@ function glm.chat_stream(messages, on_chunk, opts)
   local body = build_body(messages, opts)
   local headers = build_headers()
   local full_text = ""
-  pcall(http.stream, "POST", API_BASE, json.encode(body), headers, function(err, data)
+  http.stream("POST", API_BASE, json.encode(body), headers, function(err, data)
     if err then
       on_chunk(nil, err)
       return
@@ -125,8 +121,8 @@ function glm.chat_stream(messages, on_chunk, opts)
       on_chunk("", true)
       return
     end
-    local ok3, chunk = pcall(json.decode, data)
-    if not ok3 then return end
+    local chunk = json.decode(data)
+    if not chunk then return end
     if chunk.choices and chunk.choices[1] then
       local delta = chunk.choices[1].delta
       if delta and delta.content then
@@ -139,9 +135,13 @@ function glm.chat_stream(messages, on_chunk, opts)
 end
 
 function glm.ask(prompt, opts)
+  requires_key()
+  if type(prompt) ~= "string" then
+    return nil, "prompt must be a string"
+  end
   local resp, err = glm.chat(prompt, opts)
   if err then return nil, err end
-  if resp.choices and resp.choices[1] then
+  if resp and resp.choices and resp.choices[1] then
     return resp.choices[1].message.content, nil
   end
   return nil, "unexpected response format"

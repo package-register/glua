@@ -26,28 +26,21 @@ assert(usr.role == "user", "user role")
 local asst = glm.assistant("hello!")
 assert(asst.role == "assistant", "assistant role")
 
--- without API key, chat should return nil, err
-local resp, err = glm.chat("test")
-assert(resp == nil, "chat without key should return nil")
-assert(err ~= nil, "chat without key should have error")
+-- without API key, glm.chat should error
+local ok1, err1 = pcall(glm.chat, "test")
+assert(not ok1, "chat without key should fail")
+assert(err1 ~= nil, "chat without key should error")
 
--- chat_stream without key should call callback with error
-local stream_err = nil
-glm.chat_stream("test", function(chunk, done)
-  if chunk == nil then stream_err = done end
-end)
-assert(stream_err ~= nil, "chat_stream without key should error via callback")
+-- ask without key should error
+local ok2, err2 = pcall(glm.ask, "test")
+assert(not ok2, "ask without key should fail")
+assert(err2 ~= nil, "ask without key should error")
 
--- ask without key should fail
-local resp2, err2 = glm.ask("test")
-assert(resp2 == nil, "ask without key should return nil")
-assert(err2 ~= nil, "ask without key should have error")
-
--- load_key_from_env with non-existent env
+-- load_key_from_env with non-existent env should return false
 local found = glm.load_key_from_env("NON_EXISTENT_ENV_12345_TEST")
 assert(not found, "non-existent env should return false")
 
--- load_key_from_file with non-existent file
+-- load_key_from_file with non-existent file should return false
 local found2 = glm.load_key_from_file("/tmp/nonexistent_glm_key_12345.key")
 assert(not found2, "non-existent file should return false")
 

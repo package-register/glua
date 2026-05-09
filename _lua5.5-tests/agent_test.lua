@@ -1,7 +1,8 @@
 print('testing agent library')
 
--- tools tests (without API key)
-local agent = dofile("../agent.lua")
+-- tools module loads correctly
+package.path = "../?.lua;../?/init.lua;" .. package.path
+local agent = require("agent")
 assert(type(agent) == "table", "agent should be a table")
 assert(type(agent.run) == "function", "agent.run should be a function")
 

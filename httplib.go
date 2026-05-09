@@ -90,7 +90,7 @@ func doHTTPRequest(L *LState, method, url, body string, headers map[string]strin
 	}
 
 	client := &http.Client{
-		Timeout: 5000 * 1000000, // 5 seconds
+		Timeout: 10000 * 1000000, // 10 seconds
 	}
 	resp, err := client.Do(req)
 	if err != nil {
