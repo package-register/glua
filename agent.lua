@@ -8,6 +8,24 @@
 
 local agent = {}
 
+-- 加载 glm 模块（兼容不同工作目录）
+local glm
+local function load_glm()
+  local paths = {"glm.lua", "../glm.lua", "./glm.lua"}
+  for _, p in ipairs(paths) do
+    local f = io.open(p, "r")
+    if f then
+      f:close()
+      glm = dofile(p)
+      return true
+    end
+  end
+  return false
+end
+if not load_glm() then
+  error("cannot find glm.lua - please run from project root directory")
+end
+
 -- ============================================================
 -- 原子工具集 (9 tools)
 -- ============================================================
