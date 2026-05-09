@@ -52,6 +52,7 @@ var lua55Tests []string = []string{
 	"pairs.lua",
 	"json.lua",
 	"http.lua",
+	"glm_test.lua",
 }
 
 func testScriptCompile(t *testing.T, script string) {
