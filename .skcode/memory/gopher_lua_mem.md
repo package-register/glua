@@ -291,3 +291,51 @@ e387a89 ✨ feat: SSE 流式 http.stream + GLM API 纯 Lua 封装
 | 写测试 | 复制 `_lua5.5-tests/xxx.lua` | 技能 5 |
 | 重生成 parser | `goyacc -o parser.go parser.go.y` | 技能 2 |
 | 运行测试 | `go test -run TestLua55` | — |
+
+## 技能 6：实现最小 Agent Loop
+
+### 架构
+
+```
+agent.lua (纯 Lua, ~180行)
+  ├── 9 原子工具 (read_file/write_file/list_dir/execute/search_files/grep/http_get/json_decode/json_encode)
+  ├── LLM 调用 (基于 glm.chat_stream)
+  ├── JSON 回复解析 (支持 ```json、纯 JSON、花括号提取)
+  └── 主循环: user input → LLM(tool_call) → execute → continue → final_answer
+```
+
+### 核心循环 (~80行)
+
+```lua
+function agent.run(task, opts)
+  local messages = {
+    {role = "system", content = tool_descriptions},
+    {role = "user", content = task},
+  }
+  for step = 1, max_steps do
+    local response = llm_call(messages)
+    local parsed = parse_json(response)
+
+    if parsed.final_answer then return parsed.final_answer end
+
+    if parsed.tool_call then
+      local name, args = parsed.tool_call.name, parsed.tool_call.args or {}
+      local result, err = execute_tool(name, args)
+      messages[#messages + 1] = {role = "user", content = result_msg}
+    end
+  end
+end
+```
+
+### 工具调用格式
+
+```json
+{"tool_call": {"name": "read_file", "args": ["path.txt"]}}
+{"final_answer": "结果"}
+```
+
+### 约束
+- 纯 Lua 实现，零编译依赖
+- 每次只调一个工具（简化 loop）
+- 结果截断 2000 字符
+- 默认最多 10 步
