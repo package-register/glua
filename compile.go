@@ -412,9 +412,9 @@ type funcContext struct {
 	labelPc         map[int]int
 	gotosCount      int
 	unresolvedGotos map[int]*gotoLabelDesc
-	globalConstMode   bool
-	declaredGlobals   map[string]bool
-	constVars         map[string]bool
+	globalConstMode bool
+	declaredGlobals map[string]bool
+	constVars       map[string]bool
 }
 
 func newFuncContext(sourcename string, parent *funcContext) *funcContext {

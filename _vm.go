@@ -360,8 +360,37 @@ func init() {
 		opArith, // OP_SUB
 		opArith, // OP_MUL
 		opArith, // OP_DIV
+		opArith, // OP_IDIV
 		opArith, // OP_MOD
 		opArith, // OP_POW
+		opArith, // OP_SHL
+		opArith, // OP_SHR
+		opArith, // OP_BAND
+		opArith, // OP_BOR
+		opArith, // OP_BXOR
+		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_BNOT
+			reg := L.reg
+			cf := L.currentFrame
+			lbase := cf.LocalBase
+			A := int(inst>>18) & 0xff //GETA
+			RA := lbase + A
+			B := int(inst & 0x1ff) //GETB
+			unaryv := L.rkValue(B)
+			if nm, ok := unaryv.(LNumber); ok {
+				// +inline-call reg.SetNumber RA LNumber(^int64(nm))
+				return 0
+			}
+			op := L.metaOp1(unaryv, "__bnot")
+			if op.Type() == LTFunction {
+				reg.Push(op)
+				reg.Push(unaryv)
+				L.Call(1, 1)
+				// +inline-call reg.Set RA reg.Pop()
+				return 0
+			}
+			L.RaiseError("__bnot undefined")
+			return 0
+		},
 		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_UNM
 			reg := L.reg
 			cf := L.currentFrame
@@ -825,10 +854,29 @@ func init() {
 		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_NOP
 			return 0
 		},
+		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_CLOSEVAR
+			reg := L.reg
+			cf := L.currentFrame
+			lbase := cf.LocalBase
+			A := int(inst>>18) & 0xff
+			RA := lbase + A
+			val := reg.Get(RA)
+			if val == LNil { return 0 }
+			mt := L.metatable(val, true)
+			if mt == LNil { return 0 }
+			closeFn := L.getFieldString(mt, "__close")
+			if closeFn.Type() != LTFunction {
+				L.RaiseError("__close metamethod is not a function, got %s", closeFn.Type().String())
+			}
+			L.reg.Push(closeFn)
+			L.reg.Push(val)
+			L.Call(1, 0)
+			return 0
+		},
 	}
 }
 
-func opArith(L *LState, inst uint32, baseframe *callFrame) int { //OP_ADD, OP_SUB, OP_MUL, OP_DIV, OP_MOD, OP_POW
+func opArith(L *LState, inst uint32, baseframe *callFrame) int { //OP_ADD, OP_SUB, OP_MUL, OP_DIV, OP_IDIV, OP_MOD, OP_POW, OP_SHL, OP_SHR, OP_BAND, OP_BOR, OP_BXOR
 	reg := L.reg
 	cf := L.currentFrame
 	lbase := cf.LocalBase
@@ -871,12 +919,31 @@ func numberArith(L *LState, opcode int, lhs, rhs LNumber) LNumber {
 		return lhs * rhs
 	case OP_DIV:
 		return lhs / rhs
+	case OP_IDIV:
+		q := int64(lhs) / int64(rhs)
+		r := int64(lhs) % int64(rhs)
+		if r != 0 && ((int64(lhs) < 0) != (int64(rhs) < 0)) { q-- }
+		return LNumber(q)
 	case OP_MOD:
 		return luaModulo(lhs, rhs)
 	case OP_POW:
 		flhs := float64(lhs)
 		frhs := float64(rhs)
 		return LNumber(math.Pow(flhs, frhs))
+	case OP_SHL:
+		shift := int64(rhs)
+		if shift < 0 { return LNumber(int64(lhs) >> uint(-shift)) }
+		return LNumber(int64(lhs) << uint(shift))
+	case OP_SHR:
+		shift := int64(rhs)
+		if shift < 0 { return LNumber(int64(lhs) << uint(-shift)) }
+		return LNumber(int64(lhs) >> uint(shift))
+	case OP_BAND:
+		return LNumber(int64(lhs) & int64(rhs))
+	case OP_BOR:
+		return LNumber(int64(lhs) | int64(rhs))
+	case OP_BXOR:
+		return LNumber(int64(lhs) ^ int64(rhs))
 	}
 	panic("should not reach here")
 	return LNumber(0)
@@ -893,10 +960,22 @@ func objectArith(L *LState, opcode int, lhs, rhs LValue) LValue {
 		event = "__mul"
 	case OP_DIV:
 		event = "__div"
+	case OP_IDIV:
+		event = "__idiv"
 	case OP_MOD:
 		event = "__mod"
 	case OP_POW:
 		event = "__pow"
+	case OP_SHL:
+		event = "__shl"
+	case OP_SHR:
+		event = "__shr"
+	case OP_BAND:
+		event = "__band"
+	case OP_BOR:
+		event = "__bor"
+	case OP_BXOR:
+		event = "__bxor"
 	}
 	op := L.metaOp2(lhs, rhs, event)
 	if _, ok := op.(*LFunction); ok {

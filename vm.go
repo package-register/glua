@@ -778,7 +778,7 @@ func init() {
 			unaryv := L.rkValue(B)
 			if nm, ok := unaryv.(LNumber); ok {
 				// this section is inlined by go-inline
-				// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
+				// source function is 'func (rg *registry) SetNumber(regi int, vali LNumber) ' in '_state.go'
 				{
 					rg := reg
 					regi := RA
@@ -797,36 +797,36 @@ func init() {
 						rg.top = regi + 1
 					}
 				}
-			} else {
-				op := L.metaOp1(unaryv, "__bnot")
-				if op.Type() == LTFunction {
-					reg.Push(op)
-					reg.Push(unaryv)
-					L.Call(1, 1)
+				return 0
+			}
+			op := L.metaOp1(unaryv, "__bnot")
+			if op.Type() == LTFunction {
+				reg.Push(op)
+				reg.Push(unaryv)
+				L.Call(1, 1)
+				// this section is inlined by go-inline
+				// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
+				{
+					rg := reg
+					regi := RA
+					vali := reg.Pop()
+					newSize := regi + 1
 					// this section is inlined by go-inline
-					// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
+					// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
 					{
-						rg := reg
-						regi := RA
-						vali := reg.Pop()
-						newSize := regi + 1
-						// this section is inlined by go-inline
-						// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
-						{
-							requiredSize := newSize
-							if requiredSize > cap(rg.array) {
-								rg.resize(requiredSize)
-							}
-						}
-						rg.array[regi] = vali
-						if regi >= rg.top {
-							rg.top = regi + 1
+						requiredSize := newSize
+						if requiredSize > cap(rg.array) {
+							rg.resize(requiredSize)
 						}
 					}
-				} else {
-					L.RaiseError("__bnot undefined")
+					rg.array[regi] = vali
+					if regi >= rg.top {
+						rg.top = regi + 1
+					}
 				}
+				return 0
 			}
+			L.RaiseError("__bnot undefined")
 			return 0
 		},
 		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_UNM
@@ -2378,7 +2378,6 @@ func numberArith(L *LState, opcode int, lhs, rhs LNumber) LNumber {
 	case OP_DIV:
 		return lhs / rhs
 	case OP_IDIV:
-		// Lua floor division (rounds toward negative infinity)
 		q := int64(lhs) / int64(rhs)
 		r := int64(lhs) % int64(rhs)
 		if r != 0 && ((int64(lhs) < 0) != (int64(rhs) < 0)) {
