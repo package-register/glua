@@ -1,25 +1,39 @@
 -- agent/init.lua — 最小 Agent Loop
---
--- 用法:
---   local agent = require "agent"
---   agent.run("列出当前目录并告诉我最大的文件")
---
--- 需先设环境变量:
---   export GLM_API_KEY="xxx"
---   export HTTPS_PROXY="http://172.19.96.1:7897"  (WSL 需要)
+-- 用法: local agent = require "agent"  (从项目根目录)
 
-package.path = "./?.lua;./?/init.lua;" .. package.path
-
-local config = require("agent.config")
-local tools = require("agent.tools")
-if type(tools) ~= "table" then
-  error("agent.tools 加载失败: type=" .. type(tools) .. ", value=" .. tostring(tools))
+-- 兼容不同 CWD：尝试多个路径加载子模块
+local function find_file(name)
+  local paths = {
+    "agent/" .. name,
+    "../agent/" .. name,
+    "./agent/" .. name,
+    name,
+  }
+  for _, p in ipairs(paths) do
+    local f = io.open(p, "r")
+    if f then f:close(); return p end
+  end
+  return nil
 end
-local glm_mod = require("agent.glm")
 
-local agent = {}
+local function load_module(name)
+  local p = find_file(name)
+  if not p then return nil end
+  return dofile(p)
+end
 
+local config = load_module("config.lua")
+local tools = load_module("tools.lua")
+local glm_mod = load_module("glm.lua")
+
+if not config or not tools or not glm_mod then
+  error("agent: 无法加载子模块 — 请从项目根目录运行 ./glua agent/demo.lua")
+end
+
+-- ============================================================
 -- 解析 LLM 回复中的 JSON
+-- ============================================================
+
 local function parse_json(text)
   local ok, r = pcall(json.decode, text)
   if ok then return r end
@@ -46,7 +60,10 @@ local function parse_json(text)
   return nil
 end
 
+-- ============================================================
 -- 调用 LLM
+-- ============================================================
+
 local function llm(glm, messages)
   io.write("[LLM] ")
   local full = ""
@@ -59,9 +76,11 @@ local function llm(glm, messages)
   return full
 end
 
+-- ============================================================
 -- 执行工具
+-- ============================================================
+
 local function exec(call)
-  -- 兼容两种格式: {tool="xxx", args=[...]} 或 {tool_call={name="xxx", args=[...]}}
   local name, args
   if call.tool then
     name, args = call.tool, call.args or {}
@@ -72,35 +91,28 @@ local function exec(call)
   end
   local fn = tools[name]
   if not fn then
-    -- 尝试别名
     local aliases = {execute = "run", list = "list_dir", find = "search", cat = "read_file"}
     fn = tools[aliases[name]]
   end
   if type(fn) ~= "function" then
-    return nil, "工具 '" .. tostring(name) .. "' 无效 (type=" .. type(fn) .. ")"
+    return nil, "未知工具: " .. tostring(name)
   end
-  -- 统一 args 为 table
+  -- 直接调用（不用 table.unpack，避免 gopher-lua bug）
   local call_args = type(args) == "table" and args or (args ~= nil and {args} or {})
-  -- 直接调用（不用 pcall + table.unpack，避免 gopher-lua bug）
-  -- table.unpack 在 gopher-lua 中会破坏函数引用
   local r
-  if #call_args == 0 then
-    r = fn()
-  elseif #call_args == 1 then
-    r = fn(call_args[1])
-  elseif #call_args == 2 then
-    r = fn(call_args[1], call_args[2])
-  else
-    r = fn(call_args[1], call_args[2], call_args[3])
-  end
-  if r == nil then
-    return nil, "工具无返回"
-  end
+  if #call_args == 0 then r = fn()
+  elseif #call_args == 1 then r = fn(call_args[1])
+  elseif #call_args == 2 then r = fn(call_args[1], call_args[2])
+  else r = fn(call_args[1], call_args[2], call_args[3]) end
+  if r == nil then return nil, "工具无返回" end
   return r
 end
 
+-- ============================================================
 -- 主循环
-function agent.run(task, opts)
+-- ============================================================
+
+function agent_run(task, opts)
   opts = opts or {}
 
   -- 初始化配置
@@ -160,4 +172,5 @@ function agent.run(task, opts)
   return "达到最大步数 " .. max_steps
 end
 
+local agent = {run = agent_run}
 return agent

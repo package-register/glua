@@ -130,6 +130,14 @@ func doREPL(L *lua.LState) {
 		if str, err := loadline(rl, L); err == nil {
 			if err := L.DoString(str); err != nil {
 				fmt.Println(err)
+			} else if L.GetTop() > 0 {
+				// print return values
+				for i := 1; i <= L.GetTop(); i++ {
+					if i > 1 { fmt.Print("\t") }
+					fmt.Print(L.Get(i).String())
+				}
+				fmt.Println()
+				L.Pop(L.GetTop())
 			}
 		} else { // error on loadline
 			fmt.Println(err)
@@ -151,7 +159,7 @@ func loadline(rl *readline.Instance, L *lua.LState) (string, error) {
 	rl.SetPrompt("> ")
 	if line, err := rl.Readline(); err == nil {
 		if _, err := L.LoadString("return " + line); err == nil { // try add return <...> then compile
-			return line, nil
+			return "return " + line, nil
 		} else {
 			return multiline(line, rl, L)
 		}
