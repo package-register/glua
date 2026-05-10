@@ -7,6 +7,8 @@ with Lua: **Be a scripting language with extensible semantics** . It provides
 Go APIs that allow you to easily embed a scripting language to your Go host
 programs.
 
+This fork extends GopherLua with Lua 5.2-5.5 features, built-in JSON/HTTP libraries, GLM AI API integration, and a minimal Agent Loop framework. See [Extended Features](#extended-features) for details.
+
 ## Table of Contents
 
 - [Design principle](#design-principle)
@@ -776,8 +778,106 @@ func main() {
 - `file:setvbuf` does not support a line buffering.
 - Daylight saving time is not supported.
 - GopherLua has a function to set an environment variable : `os.setenv(name, value)`
-- GopherLua support `goto` and `::label::` statement in Lua5.2.
-    - `goto` is a keyword and not a valid variable name.
+- GopherLua supports `goto` and `::label::` statement (Lua 5.2).
+- This fork also supports `//`, `<<`, `>>`, `&`, `|`, `~` operators (Lua 5.3+).
+- This fork supports binary literals `0b1010`, hex floats `0x.1p+4`, and numeric underscores `1_000_000`.
+- This fork adds `<const>` and `<close>` variable attributes (Lua 5.4).
+- This fork adds `global` keyword and `global <const> *` strict mode (Lua 5.5).
+- This fork adds built-in `json` and `http` libraries, auto-loaded with `OpenLibs()`.
+- This fork adds `glm.lua` (GLM AI API) and `agent/` (minimal Agent Loop) as pure-Lua modules.
+
+## Extended Features
+
+This fork extends GopherLua with the following capabilities:
+
+### Lua 5.2-5.5 Syntax
+
+| Version | Features |
+|---------|----------|
+| 5.2 | `goto` / `::label::` |
+| 5.3 | `//` floor division, `<<` `>>` `&` `\|` `~` bitwise ops, `0b` binary, hex float `0x.1p+4`, `\xHH` `\u{HHHH}` escapes, numeric underscores `1_000_000` |
+| 5.4 | `<const>` constant locals, `<close>` with `__close` metamethod, `__pairs`/`__ipairs` |
+| 5.5 | `global` keyword, `global <const> *` strict mode |
+
+```lua
+-- Examples
+local x = 10 // 3          -- 3 (floor division)
+local y = 1 << 10          -- 1024 (bit shift)
+local z = 0xFF & 0x0F      -- 15 (bitwise AND)
+local c <const> = 42       -- immutable constant
+local r <close> = open()   -- auto-closed on scope exit
+global n = 100             -- explicit global declaration
+```
+
+### Built-in `json` Library
+
+Full JSON encode/decode, no external dependencies.
+
+```lua
+local t = json.decode('{"hello":"world"}')
+print(t.hello)              --> "world"
+local s = json.encode({a=1, b=2}, true)  -- pretty print
+```
+
+### Built-in `http` Library
+
+HTTP client with GET, POST, PUT, DELETE, and SSE streaming.
+
+```lua
+-- Simple request
+local resp = http.get("https://api.example.com")
+print(resp.status, resp.body)
+
+-- SSE streaming (for LLM APIs)
+http.stream("POST", url, body, headers, function(err, data)
+  if err then print(err); return end
+  if data == nil then print("[DONE]"); return end
+  local chunk = json.decode(data)
+  io.write(chunk.choices[1].delta.content or "")
+end)
+```
+
+### GLM AI API (`glm.lua`)
+
+Pure-Lua wrapper for Zhipu GLM API.
+
+```lua
+local glm = require "glm"
+glm.load_key_from_env("GLM_API_KEY")
+
+-- Non-streaming
+local resp = glm.ask("介绍一下人工智能")
+print(resp)
+
+-- Streaming
+glm.chat_stream("讲个故事", function(text, done)
+  if text == nil then return end
+  io.write(text)
+end)
+```
+
+### Minimal Agent Loop (`agent/`)
+
+Inspired by [GenericAgent](github.com/lsdefine/GenericAgent): ~150 line core + 9 atomic tools.
+
+```lua
+local agent = require "agent"
+local result = agent.run("列出当前目录最大的 .go 文件")
+print(result)
+```
+
+The agent uses a tool-calling loop:
+1. LLM decides which tool to call (JSON format)
+2. Tool executes, result fed back
+3. Loop continues until LLM provides final answer
+
+Default tools: `read_file`, `write_file`, `list_dir`, `run`, `search`, `grep`, `http_get`, `now`, `pwd`
+
+### Known Limitations
+
+- **`table.unpack` bug**: gopher-lua's `table.unpack` corrupts function references. Agent tools use indexed argument passing instead.
+- **`pcall` error corruption**: Error objects caught by `pcall` become nil when passed through nested function calls. The agent avoids `pcall` around tool calls.
+- **REPL `local` scoping**: Each REPL line is an independent chunk. Use global variables (`glm = require "glm"` not `local glm`).
 
 ## Standalone interpreter
 
