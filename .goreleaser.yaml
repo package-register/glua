@@ -2,17 +2,12 @@ version: 2
 
 project_name: glua
 
-before:
-  hooks:
-    - ./_tools/go-inline *.go
-    - go fmt ./...
-
 builds:
   - id: glua
     main: ./cmd/glua/
     binary: glua
     ldflags:
-      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
+      - -s -w
     env:
       - CGO_ENABLED=0
     goos:
@@ -29,7 +24,7 @@ builds:
 archives:
   - id: binary
     format: binary
-    name_template: "{{ .Binary }}-{{ .Os }}-{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}"
+    name_template: "{{ .Binary }}-{{ .Os }}-{{ .Arch }}"
 
 checksum:
   name_template: "checksums.txt"
