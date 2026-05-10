@@ -1,4 +1,4 @@
-module github.com/yuin/gopher-lua
+module github.com/package-register/glua
 
 go 1.23
 
