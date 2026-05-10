@@ -1,7 +1,7 @@
 print('testing glm library')
 
 -- load glm module
-local glm = dofile("../glm.lua")
+local glm = dofile("../../lua/glm.lua")
 assert(type(glm) == "table", "glm should be a table")
 assert(type(glm.set_key) == "function", "glm.set_key")
 assert(type(glm.chat) == "function", "glm.chat")
