@@ -1,6 +1,6 @@
 # GopherLua — Lua 5.1~5.5 VM + Built-in JSON/HTTP + GLM AI + Agent
 
-[![Go](https://github.com/package-register/glua/actions/workflows/test.yml/badge.svg)](https://github.com/package-register/glua/actions/workflows/test.yml)
+[![Go](https://github.com/package-register/glua/actions/workflows/test.yaml/badge.svg)](https://github.com/package-register/glua/actions/workflows/test.yaml)
 
 GopherLua is a Lua VM and compiler written in pure Go. This fork extends it with **Lua 5.2~5.5 syntax**, **built-in json/http libraries**, **GLM AI integration**, and a **minimal Agent Loop**.
 
