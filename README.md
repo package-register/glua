@@ -43,7 +43,7 @@ cd /root/coding/go-demos/gopher-lua
 go build -o glua cmd/glua/glua.go
 
 # 演示（不需要 API Key）
-./glua demo.lua
+./glua ../lua/demo.lua
 
 # 交互式 REPL
 ./glua
@@ -60,10 +60,10 @@ export GLM_API_KEY="your-key"
 export HTTPS_PROXY="http://172.19.96.1:7897"
 
 # 环境检查
-./glua agent/setup.lua
+./glua ../lua/agent/setup.lua
 
 # 运行 Agent
-./glua agent/demo.lua
+./glua ../lua/agent/demo.lua
 ```
 
 ---
@@ -72,14 +72,13 @@ export HTTPS_PROXY="http://172.19.96.1:7897"
 
 ```
 .
-├── glm.lua                # GLM AI API 封装（纯 Lua）
-├── agent/                 # Agent Loop 框架
-│   ├── init.lua           #   核心循环
-│   ├── tools.lua          #   9 原子工具
-│   ├── glm.lua            #   GLM 封装
-│   ├── config.lua         #   配置管理
-│   ├── setup.lua          #   环境检查
-│   └── demo.lua           #   演示脚本
+├── lua/                 # Lua 模块（独立目录，不混入 Go 源码）
+│   ├── glm.lua          #   GLM AI API 封装
+│   ├── agent/           #   Agent Loop 框架
+│   │   ├── init.lua     #     核心循环
+│   │   ├── tools.lua    #     9 原子工具
+│   │   └── ...
+│   └── demo.lua         #   一键演示脚本
 ├── jsonlib.go             # json 库（Go）
 ├── httplib.go             # http 库（Go，含 SSE stream）
 ├── linit.go               # 库注册
